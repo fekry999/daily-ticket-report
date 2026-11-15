@@ -1,9 +1,8 @@
-
 name: Daily Tickets Report
 
 on:
   schedule:
-    - cron: "30 5 * * *"
+    - cron: "0 7 * * *"
 
   workflow_dispatch:
 
