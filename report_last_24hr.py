@@ -1,6 +1,7 @@
 import os
 import io
 import html
+import sys
 import smtplib
 import requests
 import matplotlib
@@ -919,3 +920,5 @@ if __name__ == "__main__":
 
         print("\nERROR:")
         print(error)
+
+        sys.exit(1)
