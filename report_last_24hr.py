@@ -1,3 +1,4 @@
+
 import os
 import io
 import html
@@ -35,31 +36,35 @@ from reportlab.platypus import (
 # =====================================================
 
 BASE_DIR = Path(__file__).resolve().parent
+
 load_dotenv(BASE_DIR / ".env")
 
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN")
 
-DATA_SOURCE_ID = os.environ.get(
-    "NOTION_DATA_SOURCE_ID",
-    "419cb32b-5aa2-8005-b004-000b721de702"
+DATA_SOURCE_ID = (
+    os.environ.get("NOTION_DATA_SOURCE_ID", "").strip()
+    or "419cb32b-5aa2-8005-b004-000b721de702"
 )
 
 GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS")
+
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD")
 
-REPORT_RECEIVER = os.environ.get(
-    "REPORT_RECEIVER",
-    "fekryosama999@gmail.com"
+REPORT_RECEIVER = (
+    os.environ.get("REPORT_RECEIVER", "").strip()
+    or "fekryosama999@gmail.com"
 )
 
 TG_TOKEN = os.environ.get("TG_TOKEN")
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
 
-DATE_COL = os.environ.get("DATE_COL") or "Reported Date & Time"
+DATE_COL = (
+    os.environ.get("DATE_COL", "").strip()
+    or "Reported Date & Time"
+)
 
 OUT = str(BASE_DIR / "report.pdf")
 
-# آخر 24 ساعة
 DAYS_BACK = 1
 
 NOTION_VERSION = "2025-09-03"
@@ -72,10 +77,16 @@ NOTION_VERSION = "2025-09-03"
 def fetch():
 
     if not NOTION_TOKEN:
-        raise ValueError("NOTION_TOKEN is missing in .env")
+        raise ValueError("NOTION_TOKEN is missing.")
 
     if not DATA_SOURCE_ID:
-        raise ValueError("NOTION_DATA_SOURCE_ID is missing in .env")
+        raise ValueError("NOTION_DATA_SOURCE_ID is missing.")
+
+    if not DATE_COL:
+        raise ValueError("DATE_COL is missing.")
+
+    print(f"Using data source: {DATA_SOURCE_ID}")
+    print(f"Using date property: [{DATE_COL}]")
 
     headers = {
         "Authorization": f"Bearer {NOTION_TOKEN}",
@@ -108,14 +119,7 @@ def fetch():
                     "date": {
                         "on_or_after": since
                     }
-                },
-
-                "sorts": [
-                    {
-                        "property": DATE_COL,
-                        "direction": "descending"
-                    }
-                ]
+                }
             }
 
             if cursor:
@@ -130,14 +134,14 @@ def fetch():
 
             if not response.ok:
                 raise RuntimeError(
-                    f"Notion API Error: "
-                    f"{response.status_code}\n"
+                    f"Notion API Error: {response.status_code}\n"
                     f"{response.text}"
                 )
 
             data = response.json()
 
             page_results = data.get("results", [])
+
             rows.extend(page_results)
 
             print(
@@ -238,11 +242,7 @@ def flat(page):
             formula_type = value.get("type")
             result[key] = value.get(formula_type, "")
 
-        elif prop_type == "created_time":
-
-            result[key] = value
-
-        elif prop_type == "last_edited_time":
+        elif prop_type in ("created_time", "last_edited_time"):
 
             result[key] = value
 
@@ -274,8 +274,6 @@ def charts(by_status, by_prio, by_who):
         "#a855f7",
     ]
 
-    # Status chart
-
     if by_status:
 
         ax[0].pie(
@@ -297,8 +295,6 @@ def charts(by_status, by_prio, by_who):
 
     ax[0].set_title("By Status")
 
-    # Priority chart
-
     priorities = list(by_prio.keys())
     priority_counts = list(by_prio.values())
 
@@ -309,8 +305,6 @@ def charts(by_status, by_prio, by_who):
     )
 
     ax[1].set_title("By Priority")
-
-    # Reporter chart
 
     top = by_who.most_common(6)[::-1]
 
@@ -389,8 +383,6 @@ def build_pdf(
         solved * 100 / total
     ) if total else 0
 
-    # Styles
-
     styles = getSampleStyleSheet()
 
     cell = ParagraphStyle(
@@ -430,8 +422,6 @@ def build_pdf(
 
     story.append(Spacer(1, 12))
 
-    # KPI TABLE
-
     kpi = Table(
         [
             ["TOTAL", "SOLVED", "PENDING", "SOLVE RATE"],
@@ -447,106 +437,32 @@ def build_pdf(
 
     kpi.setStyle(
         TableStyle([
-            (
-                "BACKGROUND",
-                (0, 0),
-                (-1, 0),
-                colors.HexColor("#1e1b4b")
-            ),
-
-            (
-                "TEXTCOLOR",
-                (0, 0),
-                (-1, 0),
-                colors.white
-            ),
-
-            (
-                "BACKGROUND",
-                (0, 1),
-                (-1, 1),
-                colors.HexColor("#eef2ff")
-            ),
-
-            (
-                "FONTSIZE",
-                (0, 0),
-                (-1, 0),
-                8
-            ),
-
-            (
-                "FONTSIZE",
-                (0, 1),
-                (-1, 1),
-                22
-            ),
-
-            (
-                "FONTNAME",
-                (0, 1),
-                (-1, 1),
-                "Helvetica-Bold"
-            ),
-
-            (
-                "ALIGN",
-                (0, 0),
-                (-1, -1),
-                "CENTER"
-            ),
-
-            (
-                "TOPPADDING",
-                (0, 1),
-                (-1, 1),
-                10
-            ),
-
-            (
-                "BOTTOMPADDING",
-                (0, 1),
-                (-1, 1),
-                10
-            ),
-
-            (
-                "TEXTCOLOR",
-                (1, 1),
-                (1, 1),
-                colors.HexColor("#16a34a")
-            ),
-
-            (
-                "TEXTCOLOR",
-                (2, 1),
-                (2, 1),
-                colors.HexColor("#d97706")
-            ),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e1b4b")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#eef2ff")),
+            ("FONTSIZE", (0, 0), (-1, 0), 8),
+            ("FONTSIZE", (0, 1), (-1, 1), 22),
+            ("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold"),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("TOPPADDING", (0, 1), (-1, 1), 10),
+            ("BOTTOMPADDING", (0, 1), (-1, 1), 10),
+            ("TEXTCOLOR", (1, 1), (1, 1), colors.HexColor("#16a34a")),
+            ("TEXTCOLOR", (2, 1), (2, 1), colors.HexColor("#d97706")),
         ])
     )
 
     story.append(kpi)
-
     story.append(Spacer(1, 15))
-
-    # CHARTS
 
     story.append(
         Image(
-            charts(
-                by_status,
-                by_prio,
-                by_who
-            ),
+            charts(by_status, by_prio, by_who),
             width=17.5 * cm,
             height=5.1 * cm
         )
     )
 
     story.append(Spacer(1, 15))
-
-    # TICKETS TABLE
 
     if not tickets:
 
@@ -570,60 +486,20 @@ def build_pdf(
 
         for ticket in tickets:
 
-            ticket_number = str(
-                ticket.get("Ticket Number", "")
-            )
-
-            ticket_title = str(
-                ticket.get("Ticket Title", "")
-            )
-
-            status = str(
-                ticket.get("Status", "")
-            )
-
-            priority = str(
-                ticket.get("Priority", "")
-            )
-
-            reported = str(
-                ticket.get(DATE_COL, "")
-            )
-
-            reporter = str(
-                ticket.get("Reported by", "")
-            )
+            ticket_number = str(ticket.get("Ticket Number", ""))
+            ticket_title = str(ticket.get("Ticket Title", ""))
+            status = str(ticket.get("Status", ""))
+            priority = str(ticket.get("Priority", ""))
+            reported = str(ticket.get(DATE_COL, ""))
+            reporter = str(ticket.get("Reported by", ""))
 
             data.append([
-                Paragraph(
-                    html.escape(ticket_number),
-                    cell
-                ),
-
-                Paragraph(
-                    html.escape(ticket_title),
-                    cell
-                ),
-
-                Paragraph(
-                    html.escape(status),
-                    cell
-                ),
-
-                Paragraph(
-                    html.escape(priority),
-                    cell
-                ),
-
-                Paragraph(
-                    html.escape(reported[:10] or "-"),
-                    cell
-                ),
-
-                Paragraph(
-                    html.escape(reporter),
-                    cell
-                )
+                Paragraph(html.escape(ticket_number), cell),
+                Paragraph(html.escape(ticket_title), cell),
+                Paragraph(html.escape(status), cell),
+                Paragraph(html.escape(priority), cell),
+                Paragraph(html.escape(reported[:10] or "-"), cell),
+                Paragraph(html.escape(reporter), cell)
             ])
 
         table = Table(
@@ -640,65 +516,17 @@ def build_pdf(
         )
 
         table_style = [
-            (
-                "BACKGROUND",
-                (0, 0),
-                (-1, 0),
-                colors.HexColor("#1e1b4b")
-            ),
-
-            (
-                "TEXTCOLOR",
-                (0, 0),
-                (-1, 0),
-                colors.white
-            ),
-
-            (
-                "FONTSIZE",
-                (0, 0),
-                (-1, -1),
-                8
-            ),
-
-            (
-                "VALIGN",
-                (0, 0),
-                (-1, -1),
-                "MIDDLE"
-            ),
-
-            (
-                "GRID",
-                (0, 0),
-                (-1, -1),
-                0.25,
-                colors.HexColor("#cbd5e1")
-            ),
-
-            (
-                "ROWBACKGROUNDS",
-                (0, 1),
-                (-1, -1),
-                [
-                    colors.white,
-                    colors.HexColor("#f8fafc")
-                ]
-            ),
-
-            (
-                "TOPPADDING",
-                (0, 0),
-                (-1, -1),
-                6
-            ),
-
-            (
-                "BOTTOMPADDING",
-                (0, 0),
-                (-1, -1),
-                6
-            )
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e1b4b")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [
+                colors.white,
+                colors.HexColor("#f8fafc")
+            ]),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6)
         ]
 
         for index, ticket in enumerate(tickets, 1):
@@ -710,46 +538,20 @@ def build_pdf(
             if status == "solved":
 
                 table_style.extend([
-                    (
-                        "TEXTCOLOR",
-                        (2, index),
-                        (2, index),
-                        colors.HexColor("#16a34a")
-                    ),
-
-                    (
-                        "FONTNAME",
-                        (2, index),
-                        (2, index),
-                        "Helvetica-Bold"
-                    )
+                    ("TEXTCOLOR", (2, index), (2, index), colors.HexColor("#16a34a")),
+                    ("FONTNAME", (2, index), (2, index), "Helvetica-Bold")
                 ])
 
             elif status == "pending":
 
                 table_style.extend([
-                    (
-                        "TEXTCOLOR",
-                        (2, index),
-                        (2, index),
-                        colors.HexColor("#d97706")
-                    ),
-
-                    (
-                        "FONTNAME",
-                        (2, index),
-                        (2, index),
-                        "Helvetica-Bold"
-                    )
+                    ("TEXTCOLOR", (2, index), (2, index), colors.HexColor("#d97706")),
+                    ("FONTNAME", (2, index), (2, index), "Helvetica-Bold")
                 ])
 
-        table.setStyle(
-            TableStyle(table_style)
-        )
+        table.setStyle(TableStyle(table_style))
 
         story.append(table)
-
-    # BUILD PDF
 
     document = SimpleDocTemplate(
         out,
@@ -772,13 +574,13 @@ def build_pdf(
 def send_gmail():
 
     if not GMAIL_ADDRESS:
-        raise ValueError("GMAIL_ADDRESS is missing in .env")
+        raise ValueError("GMAIL_ADDRESS is missing.")
 
     if not GMAIL_APP_PASSWORD:
-        raise ValueError("GMAIL_APP_PASSWORD is missing in .env")
+        raise ValueError("GMAIL_APP_PASSWORD is missing.")
 
     if not REPORT_RECEIVER:
-        raise ValueError("REPORT_RECEIVER is missing in .env")
+        raise ValueError("REPORT_RECEIVER is missing.")
 
     if not os.path.exists(OUT):
         raise FileNotFoundError(f"PDF file not found: {OUT}")
@@ -902,10 +704,8 @@ if __name__ == "__main__":
 
         print(f"\nPDF generated successfully: {OUT}")
 
-        # Send PDF to Gmail
         send_gmail()
 
-        # Send PDF to Telegram if configured
         send_telegram(
             total,
             solved,
