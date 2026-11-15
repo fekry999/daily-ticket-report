@@ -55,10 +55,7 @@ REPORT_RECEIVER = os.environ.get(
 TG_TOKEN = os.environ.get("TG_TOKEN")
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
 
-DATE_COL = os.environ.get(
-    "DATE_COL",
-    "Reported Date & Time"
-)
+DATE_COL = os.environ.get("DATE_COL") or "Reported Date & Time"
 
 OUT = str(BASE_DIR / "report.pdf")
 
