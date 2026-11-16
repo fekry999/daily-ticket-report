@@ -1,4 +1,3 @@
-
 import os
 import io
 import html
@@ -10,6 +9,7 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 from pathlib import Path
 from collections import Counter
@@ -22,6 +22,8 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
+from reportlab.lib.utils import ImageReader
+from reportlab.lib.enums import TA_CENTER
 from reportlab.platypus import (
     SimpleDocTemplate,
     Paragraph,
@@ -29,6 +31,7 @@ from reportlab.platypus import (
     Table,
     TableStyle,
     Image,
+    HRFlowable,
 )
 
 # =====================================================
@@ -63,6 +66,11 @@ DATE_COL = (
     or "Reported Date & Time"
 )
 
+DESC_COL = (
+    os.environ.get("DESC_COL", "").strip()
+    or "Description"
+)
+
 OUT = str(BASE_DIR / "report.pdf")
 
 DAYS_BACK = 1
@@ -71,8 +79,67 @@ NOTION_VERSION = "2025-09-03"
 
 
 # =====================================================
+# THEME
+# =====================================================
+
+NAVY = "#1e1b4b"
+INDIGO = "#6366f1"
+SLATE = "#475569"
+MUTED = "#94a3b8"
+LIGHT_BG = "#eef2ff"
+ROW_ALT = "#f8fafc"
+LINE = "#e2e8f0"
+
+STATUS_COLORS = {
+    "solved": "#16a34a",
+    "pending": "#d97706",
+    "in progress": "#2563eb",
+    "open": "#2563eb",
+    "closed": "#16a34a",
+}
+
+PRIORITY_COLORS = {
+    "critical": "#b91c1c",
+    "high": "#ef4444",
+    "medium": "#f59e0b",
+    "low": "#22c55e",
+}
+
+PRIORITY_ORDER = ["critical", "high", "medium", "low"]
+
+
+def status_color(name):
+    return STATUS_COLORS.get(str(name).strip().lower(), SLATE)
+
+
+def priority_color(name):
+    return PRIORITY_COLORS.get(str(name).strip().lower(), SLATE)
+
+
+# =====================================================
 # NOTION API
 # =====================================================
+
+def fetch_page_text(page_id, headers, limit=300):
+    """Fallback: read description from the page body."""
+    url = f"https://api.notion.com/v1/blocks/{page_id}/children?page_size=50"
+
+    r = requests.get(url, headers=headers, timeout=60)
+
+    if not r.ok:
+        return ""
+
+    parts = []
+
+    for block in r.json().get("results", []):
+        btype = block.get("type")
+        rich = block.get(btype, {}).get("rich_text", [])
+        text = "".join(t.get("plain_text", "") for t in rich)
+        if text:
+            parts.append(text)
+
+    return " ".join(parts)[:limit]
+
 
 def fetch():
 
@@ -87,6 +154,7 @@ def fetch():
 
     print(f"Using data source: {DATA_SOURCE_ID}")
     print(f"Using date property: [{DATE_COL}]")
+    print(f"Using description property: [{DESC_COL}]")
 
     headers = {
         "Authorization": f"Bearer {NOTION_TOKEN}",
@@ -157,7 +225,15 @@ def fetch():
             if not cursor:
                 break
 
-    tickets = [flat(page) for page in rows]
+    tickets = []
+
+    for page in rows:
+        ticket = flat(page)
+
+        if not ticket.get(DESC_COL):
+            ticket[DESC_COL] = fetch_page_text(page["id"], headers)
+
+        tickets.append(ticket)
 
     print(f"Fetched {len(tickets)} tickets from Notion.")
 
@@ -257,31 +333,70 @@ def flat(page):
 # CHARTS
 # =====================================================
 
-def charts(by_status, by_prio, by_who):
+def charts(by_status, by_prio):
 
     fig, ax = plt.subplots(
         1,
-        3,
-        figsize=(11, 3.2)
+        2,
+        figsize=(9.5, 3.4),
+        gridspec_kw={"width_ratios": [1.15, 1]}
     )
 
-    palette = [
-        "#6366f1",
-        "#22c55e",
-        "#f59e0b",
-        "#ef4444",
-        "#06b6d4",
-        "#a855f7",
-    ]
+    total = sum(by_status.values())
+
+    # ---------- Donut: status ----------
 
     if by_status:
 
-        ax[0].pie(
-            by_status.values(),
-            labels=by_status.keys(),
-            colors=palette,
-            autopct="%1.0f%%",
-            wedgeprops=dict(width=0.45)
+        labels = list(by_status.keys())
+        values = list(by_status.values())
+        slice_colors = [status_color(label) for label in labels]
+
+        wedges, _, autotexts = ax[0].pie(
+            values,
+            colors=slice_colors,
+            startangle=90,
+            counterclock=False,
+            autopct=lambda p: f"{p:.0f}%" if p >= 5 else "",
+            pctdistance=0.775,
+            wedgeprops=dict(
+                width=0.45,
+                edgecolor="white",
+                linewidth=2
+            ),
+            textprops=dict(
+                color="white",
+                fontsize=9,
+                fontweight="bold"
+            )
+        )
+
+        ax[0].text(
+            0, 0.07,
+            str(total),
+            ha="center",
+            va="center",
+            fontsize=22,
+            fontweight="bold",
+            color=NAVY
+        )
+
+        ax[0].text(
+            0, -0.2,
+            "tickets",
+            ha="center",
+            va="center",
+            fontsize=8,
+            color=MUTED
+        )
+
+        ax[0].legend(
+            wedges,
+            [f"{l}  ({v})" for l, v in zip(labels, values)],
+            loc="center left",
+            bbox_to_anchor=(1.0, 0.5),
+            frameon=False,
+            fontsize=8
         )
 
     else:
@@ -290,45 +405,77 @@ def charts(by_status, by_prio, by_who):
             0.5, 0.5,
             "No data",
             ha="center",
-            va="center"
+            va="center",
+            color=MUTED
         )
 
-    ax[0].set_title("By Status")
+        ax[0].axis("off")
 
-    priorities = list(by_prio.keys())
-    priority_counts = list(by_prio.values())
-
-    ax[1].bar(
-        priorities or [""],
-        priority_counts or [0],
-        color=palette
+    ax[0].set_title(
+        "By Status",
+        fontsize=11,
+        fontweight="bold",
+        color=NAVY,
+        pad=10
     )
 
-    ax[1].set_title("By Priority")
+    # ---------- Bars: priority ----------
 
-    top = by_who.most_common(6)[::-1]
-
-    ax[2].barh(
-        [name for name, count in top] or [""],
-        [count for name, count in top] or [0],
-        color="#6366f1"
+    ordered = sorted(
+        by_prio.items(),
+        key=lambda item: (
+            PRIORITY_ORDER.index(item[0].strip().lower())
+            if item[0].strip().lower() in PRIORITY_ORDER
+            else len(PRIORITY_ORDER)
+        )
     )
 
-    ax[2].set_title("By Reporter")
+    names = [name for name, _ in ordered] or [""]
+    counts = [count for _, count in ordered] or [0]
 
-    for axis in ax[1:]:
+    bars = ax[1].bar(
+        names,
+        counts,
+        color=[priority_color(n) for n in names],
+        width=0.5
+    )
 
-        axis.spines["top"].set_visible(False)
-        axis.spines["right"].set_visible(False)
+    ax[1].bar_label(
+        bars,
+        padding=3,
+        fontsize=9,
+        fontweight="bold",
+        color=NAVY
+    )
 
-    fig.tight_layout()
+    ax[1].set_ylim(0, max(counts) * 1.25 if max(counts) else 1)
+    ax[1].yaxis.set_major_locator(MaxNLocator(integer=True))
+    ax[1].yaxis.grid(True, color=LINE, linewidth=0.8)
+    ax[1].set_axisbelow(True)
+
+    ax[1].set_title(
+        "By Priority",
+        fontsize=11,
+        fontweight="bold",
+        color=NAVY,
+        pad=10
+    )
+
+    ax[1].tick_params(colors=SLATE, labelsize=8, length=0)
+
+    for side in ("top", "right", "left"):
+        ax[1].spines[side].set_visible(False)
+
+    ax[1].spines["bottom"].set_color(LINE)
+
+    fig.tight_layout(w_pad=3)
 
     buffer = io.BytesIO()
 
     fig.savefig(
         buffer,
         format="png",
-        dpi=150,
+        dpi=170,
         bbox_inches="tight"
     )
 
@@ -337,6 +484,32 @@ def charts(by_status, by_prio, by_who):
     buffer.seek(0)
 
     return buffer
+
+
+# =====================================================
+# PDF HELPERS
+# =====================================================
+
+def draw_footer(canvas, doc):
+
+    canvas.saveState()
+
+    canvas.setStrokeColor(colors.HexColor(LINE))
+    canvas.setLineWidth(0.5)
+    canvas.line(1.5 * cm, 1.3 * cm, A4[0] - 1.5 * cm, 1.3 * cm)
+
+    canvas.setFont("Helvetica", 8)
+    canvas.setFillColor(colors.HexColor(MUTED))
+
+    canvas.drawString(1.5 * cm, 0.8 * cm, "Tickets Tracker Report")
+
+    canvas.drawRightString(
+        A4[0] - 1.5 * cm,
+        0.8 * cm,
+        f"Page {doc.page}"
+    )
+
+    canvas.restoreState()
 
 
 # =====================================================
@@ -362,11 +535,6 @@ def build_pdf(
         for t in tickets
     )
 
-    by_who = Counter(
-        t.get("Reported by") or "N/A"
-        for t in tickets
-    )
-
     solved = sum(
         count
         for status, count in by_status.items()
@@ -385,11 +553,32 @@ def build_pdf(
 
     styles = getSampleStyleSheet()
 
+    title_style = ParagraphStyle(
+        "ReportTitle",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=22,
+        leading=26,
+        textColor=colors.HexColor(NAVY),
+        alignment=TA_CENTER,
+        spaceAfter=4
+    )
+
+    subtitle_style = ParagraphStyle(
+        "ReportSubtitle",
+        parent=styles["Normal"],
+        fontSize=9,
+        leading=12,
+        textColor=colors.HexColor(MUTED),
+        alignment=TA_CENTER
+    )
+
     cell = ParagraphStyle(
         "TableCell",
         parent=styles["Normal"],
-        fontSize=7,
-        leading=9,
+        fontSize=7.5,
+        leading=10,
+        textColor=colors.HexColor("#0f172a"),
         wordWrap="CJK"
     )
 
@@ -397,79 +586,95 @@ def build_pdf(
         "TableHeader",
         parent=cell,
         textColor=colors.white,
-        fontName="Helvetica-Bold"
+        fontName="Helvetica-Bold",
+        fontSize=8
     )
 
     story = []
 
-    generated = datetime.now().strftime(
-        "%Y-%m-%d %H:%M"
-    )
+    generated = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    story.append(Paragraph(title, title_style))
 
     story.append(
         Paragraph(
-            title,
-            styles["Title"]
+            f"{subtitle}  |  Generated: {generated}",
+            subtitle_style
         )
     )
+
+    story.append(Spacer(1, 8))
 
     story.append(
-        Paragraph(
-            f"{subtitle} Generated: {generated}",
-            styles["Normal"]
+        HRFlowable(
+            width="100%",
+            thickness=1.2,
+            color=colors.HexColor(INDIGO),
+            spaceAfter=12
         )
     )
 
-    story.append(Spacer(1, 12))
+    # ---------- KPI cards ----------
 
     kpi = Table(
         [
             ["TOTAL", "SOLVED", "PENDING", "SOLVE RATE"],
-            [
-                total,
-                solved,
-                pending,
-                f"{rate}%"
-            ]
+            [total, solved, pending, f"{rate}%"]
         ],
-        colWidths=[4.4 * cm] * 4
+        colWidths=[4.5 * cm] * 4,
+        rowHeights=[0.8 * cm, 1.8 * cm]
     )
 
     kpi.setStyle(
         TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e1b4b")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(NAVY)),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#eef2ff")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, 0), 8),
+            ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor(LIGHT_BG)),
             ("FONTSIZE", (0, 1), (-1, 1), 22),
             ("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold"),
-            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-            ("TOPPADDING", (0, 1), (-1, 1), 10),
-            ("BOTTOMPADDING", (0, 1), (-1, 1), 10),
+            ("TEXTCOLOR", (0, 1), (0, 1), colors.HexColor(NAVY)),
             ("TEXTCOLOR", (1, 1), (1, 1), colors.HexColor("#16a34a")),
             ("TEXTCOLOR", (2, 1), (2, 1), colors.HexColor("#d97706")),
+            ("TEXTCOLOR", (3, 1), (3, 1), colors.HexColor(INDIGO)),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LINEAFTER", (0, 0), (-2, -1), 4, colors.white),
         ])
     )
 
     story.append(kpi)
-    story.append(Spacer(1, 15))
+    story.append(Spacer(1, 14))
+
+    # ---------- Charts ----------
+
+    chart_buffer = charts(by_status, by_prio)
+
+    img_w, img_h = ImageReader(chart_buffer).getSize()
+    chart_buffer.seek(0)
+
+    chart_width = 16.5 * cm
+    chart_height = chart_width * img_h / img_w
 
     story.append(
         Image(
-            charts(by_status, by_prio, by_who),
-            width=17.5 * cm,
-            height=5.1 * cm
+            chart_buffer,
+            width=chart_width,
+            height=chart_height
         )
     )
 
-    story.append(Spacer(1, 15))
+    story.append(Spacer(1, 14))
+
+    # ---------- Tickets table ----------
 
     if not tickets:
 
         story.append(
             Paragraph(
                 "No tickets found during the last 24 hours.",
-                styles["Normal"]
+                subtitle_style
             )
         )
 
@@ -478,78 +683,78 @@ def build_pdf(
         data = [[
             Paragraph("Ticket", header_cell),
             Paragraph("Title", header_cell),
+            Paragraph("Description", header_cell),
             Paragraph("Status", header_cell),
             Paragraph("Priority", header_cell),
             Paragraph("Reported", header_cell),
-            Paragraph("By", header_cell)
         ]]
 
         for ticket in tickets:
 
             ticket_number = str(ticket.get("Ticket Number", ""))
             ticket_title = str(ticket.get("Ticket Title", ""))
-            status = str(ticket.get("Status", ""))
-            priority = str(ticket.get("Priority", ""))
+            description = str(ticket.get(DESC_COL, "") or "-")
+
+            if len(description) > 300:
+                description = description[:300].rstrip() + "..."
+
+            status = str(ticket.get("Status", "")) or "-"
+            priority = str(ticket.get("Priority", "")) or "-"
             reported = str(ticket.get(DATE_COL, ""))
-            reporter = str(ticket.get("Reported by", ""))
 
             data.append([
-                Paragraph(html.escape(ticket_number), cell),
+                Paragraph(
+                    f"<b>{html.escape(ticket_number)}</b>",
+                    cell
+                ),
                 Paragraph(html.escape(ticket_title), cell),
-                Paragraph(html.escape(status), cell),
-                Paragraph(html.escape(priority), cell),
+                Paragraph(
+                    html.escape(description).replace("\n", "<br/>"),
+                    cell
+                ),
+                Paragraph(
+                    f'<font color="{status_color(status)}">'
+                    f"<b>{html.escape(status)}</b></font>",
+                    cell
+                ),
+                Paragraph(
+                    f'<font color="{priority_color(priority)}">'
+                    f"<b>{html.escape(priority)}</b></font>",
+                    cell
+                ),
                 Paragraph(html.escape(reported[:10] or "-"), cell),
-                Paragraph(html.escape(reporter), cell)
             ])
 
         table = Table(
             data,
             colWidths=[
-                3 * cm,
-                5.2 * cm,
-                1.8 * cm,
-                1.7 * cm,
-                2.1 * cm,
-                3.7 * cm
+                2.6 * cm,   # Ticket
+                3.8 * cm,   # Title
+                6.2 * cm,   # Description
+                1.8 * cm,   # Status
+                1.7 * cm,   # Priority
+                1.9 * cm,   # Reported
             ],
             repeatRows=1
         )
 
-        table_style = [
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e1b4b")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [
-                colors.white,
-                colors.HexColor("#f8fafc")
-            ]),
-            ("TOPPADDING", (0, 0), (-1, -1), 6),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 6)
-        ]
-
-        for index, ticket in enumerate(tickets, 1):
-
-            status = str(
-                ticket.get("Status", "")
-            ).strip().lower()
-
-            if status == "solved":
-
-                table_style.extend([
-                    ("TEXTCOLOR", (2, index), (2, index), colors.HexColor("#16a34a")),
-                    ("FONTNAME", (2, index), (2, index), "Helvetica-Bold")
-                ])
-
-            elif status == "pending":
-
-                table_style.extend([
-                    ("TEXTCOLOR", (2, index), (2, index), colors.HexColor("#d97706")),
-                    ("FONTNAME", (2, index), (2, index), "Helvetica-Bold")
-                ])
-
-        table.setStyle(TableStyle(table_style))
+        table.setStyle(
+            TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(NAVY)),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LINEBELOW", (0, 0), (-1, -1), 0.4, colors.HexColor(LINE)),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [
+                    colors.white,
+                    colors.HexColor(ROW_ALT)
+                ]),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, 0), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+                ("TOPPADDING", (0, 1), (-1, -1), 7),
+                ("BOTTOMPADDING", (0, 1), (-1, -1), 7),
+            ])
+        )
 
         story.append(table)
 
@@ -559,10 +764,14 @@ def build_pdf(
         leftMargin=1.5 * cm,
         rightMargin=1.5 * cm,
         topMargin=1.5 * cm,
-        bottomMargin=1.5 * cm
+        bottomMargin=1.8 * cm
     )
 
-    document.build(story)
+    document.build(
+        story,
+        onFirstPage=draw_footer,
+        onLaterPages=draw_footer
+    )
 
     return total, solved, pending, rate
 
