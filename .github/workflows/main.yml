@@ -33,3 +33,5 @@ jobs:
           DATE_COL: ${{ vars.DATE_COL }}
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          REPORT_RECEIVER: ${{ vars.REPORT_RECEIVER }}
+        run: python report_last_24hr.py
