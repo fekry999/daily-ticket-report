@@ -2,7 +2,8 @@ name: Daily Tickets Report
 
 on:
   schedule:
-    - cron: "0 11 * * *"
+    - cron: "0 9 * * *"
+      timezone: "Africa/Cairo"
 
   workflow_dispatch:
 
@@ -10,7 +11,8 @@ permissions:
   contents: read
 
 jobs:
-  generate-report:
+  daily-report:
+    name: Generate and Send Daily Report
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -28,7 +30,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Generate and send report
+      - name: Generate and send daily report
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID }}
